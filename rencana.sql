@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: May 17, 2025 at 02:12 AM
+-- Generation Time: May 17, 2025 at 02:23 AM
 -- Server version: 10.1.38-MariaDB
 -- PHP Version: 7.2.17
 
@@ -28,6 +28,7 @@ SET time_zone = "+00:00";
 -- Table structure for table `rencana`
 --
 
+DROP TABLE IF EXISTS `rencana`;
 CREATE TABLE `rencana` (
   `id_rencana` int(11) NOT NULL,
   `id_kelas` int(11) NOT NULL,
