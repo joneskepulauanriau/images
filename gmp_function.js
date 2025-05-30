@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const xlsx = require('xlsx');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+const { get } = require('https');
 
 // Daftarkan font Arial biasa
 registerFont('./src/fonts/arial.ttf', { family: 'Arial' });
@@ -499,7 +500,8 @@ function parseCommand(text) {
     .replace(/h2h|pertemuan langsung/gi, 'head to head')
     .replace(/\btampilkan\b/gi, 'buat')
     .replace(/\brangking\b|\bperingkat\b/gi, 'ranking')
-    .replace(/\butnuk\b|\buntk\b|\bntuk\b|\btuk\b/gi, 'untuk')
+    .replace(/\btahap\b|\bperiode\b|\bpriode\b|\bperbaikan peringkat\b/gi, '')
+    .replace(/\butnuk\b|\buntk\b|\bntuk\b|\btuk\b|\butk\b/gi, 'untuk')
     .trim();
 
   // Format khusus untuk pembuatan profil
@@ -574,6 +576,39 @@ function isNumber(value) {
   return !isNaN(value) && !isNaN(parseFloat(value));
 }
 
+function getDayNameFromDate(dateString) {
+  const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+  const date = new Date(dateString); // Format: "YYYY-MM-DD"
+  if (isNaN(date)) return "Tanggal tidak valid";
+  return days[date.getDay()];
+}
+
+async function posisiLanjutan(jumlah_grup) {
+  const huruf = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const juara = [];
+  const runnerUp = [];
+
+  for (let i = 0; i < jumlah_grup; i++) {
+    juara.push(huruf[i] + '1');
+    runnerUp.push(huruf[i] + '2');
+  }
+
+  const posisi = new Array(jumlah_grup * 2);
+
+  // Isi posisi ganjil: 1, 3, 5, ...
+  for (let i = 0; i < jumlah_grup; i++) {
+    posisi[i * 2] = juara[i];
+  }
+
+  // Isi posisi genap: 10, 8, 6, ... (dari belakang)
+  for (let i = 0; i < jumlah_grup; i++) {
+    posisi[(jumlah_grup * 2 - 1) - i * 2] = runnerUp[i];
+  }
+
+  return posisi;
+}
+
 module.exports = {
-  handleFile, readFileExcel, DateToWIB, DateToStr, DateTimeIndonesia, generateImage, generateImage2, generateImageReport, parseCommand, parsePerintah, isNumber
+  handleFile, readFileExcel, DateToWIB, DateToStr, DateTimeIndonesia, generateImage, generateImage2, generateImageReport, parseCommand, parsePerintah, 
+  isNumber, getDayNameFromDate, posisiLanjutan
 };

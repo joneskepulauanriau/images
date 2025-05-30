@@ -2,8 +2,11 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = requi
 const { Session } = require("inspector/promises");
 const fs = require("fs");
 const { error } = require("console");
-const {getDataRow, getDataRowQuery, insertData, updateData, deleteData, getPeringkat, findHeadToHead, resetAutoincrement, getIDPlayer, getPosisiTerbaik} = require('./src/model/gmp_service');
-const { handleFile, readFileExcel, generateImage, generateImage2, DateToWIB, parseCommand, parsePerintah, isNumber, generateImageReport, DateTimeIndonesia} = require('./src/model/gmp_function');
+const {getDataRow, getDataRowQuery, insertData, updateData, deleteData, getPeringkat, findHeadToHead, resetAutoincrement, getIDPlayer, getPosisiTerbaik } = require('./src/model/gmp_service');
+const { handleFile, readFileExcel, generateImage, generateImage2, DateToWIB, parseCommand, parsePerintah, isNumber, generateImageReport, DateTimeIndonesia, getDayNameFromDate} = require('./src/model/gmp_function');
+const { isPointInPolygon} = require('geolib');
+const locations = require('./locations.json');
+const { sign } = require("crypto");
 require("dotenv").config();
 
 const path = 'parameters.json';
@@ -32,8 +35,9 @@ const GMP_DAFTARKAN_SAYA = `daftarkan saya`;
 const GMP_DAFTARKAN = `daftarkan`;
 const GMP_PROFIL_PEMAIN = `buat profil pemain`;
 const GMP_TENTUKAN_POOL = `buat pool`;
+const GMP_REKAP_PRESENSI = `buat rekap presensi`;
 
-const perintahAll = [GMP_INFOGRAFIS_RANGKING_PEMAIN, GMP_RANGKING_PEMAIN,GMP_HEAD_TO_HEAD,  GMP_HEAD_TO_HEAD2, GMP_DISP_TURNAMEN, GMP_DISP_PEMAIN, GMP_POSISI_TERBAIK, GMP_DAFTARKAN, GMP_DAFTARKAN_SAYA, GMP_PROFIL_PEMAIN, GMP_RENCANA_TURNAMEN, GMP_TENTUKAN_POOL, 'tambah', 'hapus', 'perbaiki', 'perbaiki status', 'perbaiki realisasi'];
+const perintahAll = [GMP_REKAP_PRESENSI, GMP_INFOGRAFIS_RANGKING_PEMAIN, GMP_RANGKING_PEMAIN,GMP_HEAD_TO_HEAD,  GMP_HEAD_TO_HEAD2, GMP_DISP_TURNAMEN, GMP_DISP_PEMAIN, GMP_POSISI_TERBAIK, GMP_DAFTARKAN, GMP_DAFTARKAN_SAYA, GMP_PROFIL_PEMAIN, GMP_RENCANA_TURNAMEN, GMP_TENTUKAN_POOL, 'tambah', 'hapus', 'perbaiki', 'perbaiki status', 'perbaiki realisasi'];
 
 const GMP_MULAI_IMPORT_DATA = `mulai import data`; 
 const GMP_RESET_PERTANDINGAN = `reset pertandingan`;
@@ -152,6 +156,15 @@ function parseData(input) {
       .padStart(2, '0')}-${d.getFullYear()}`;
   }
 
+function scheduleValid(mulai, selesai, sekarang) {
+    console.log(mulai, selesai, sekarang);
+  //const startTime = parseTimeToDate(mulai);
+  //const endTime = parseTimeToDate(selesai);
+  //const currentTime = parseTimeToDate(sekarang);
+
+  return sekarang >= mulai && sekarang <= selesai;
+}
+
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState("./auth_multi_device"); 
@@ -202,7 +215,7 @@ async function startBot() {
             return;
         } 
 
-        const statapp = getKeywordsById(IDAPPSTART);
+         const statapp = getKeywordsById(IDAPPSTART);
         console.log(statapp);
         //return;
 
@@ -246,17 +259,23 @@ async function startBot() {
         //const para3 = command.parameter[2];
         const menu = command.perintah.toLowerCase();
         //console.log(menu);
-        console.log(command);
+        //console.log('Command: ', command);
 
-        if (senderNumber !== authorizingUser) {   
-            console.log(text);
-            if (!perintahAll.includes(menu)) return;
+        /***********************************************
+         * Mencegat hanya perintah yang sesuai saja
+         ***********************************************/
+        if (messageType==='conversation') {
+            if (senderNumber !== authorizingUser) {   
+                console.log(text);
+                if (!perintahAll.includes(menu)) return;
+            }
         }
 
         const recPengguna =await getUser(senderNumber);
-        console.log(recPengguna['success']);
         
-        if (recPengguna.success || senderJid.includes('120363419620335483@g.us') || senderJid.includes('120363177930974800@g.us') || senderNumber === authorizingUser) {
+        console.log('Sender:', recPengguna['success']);
+        
+        if (recPengguna.success || senderJid.includes('120363401358668785@g.us') || senderJid.includes('120363177930974800@g.us') || senderNumber === authorizingUser) {
             //console.log(`📩 Pesan dari ${senderJid} ${senderName} (${senderNumber}): ${text}`);
             if (userSessions[sender]) {
                 let session = userSessions[sender];
@@ -399,6 +418,116 @@ async function startBot() {
                 return;
             }
 
+            /*************************  
+             * Kirim Data Presensi
+             *************************/
+
+            if (msg.message.locationMessage){
+                sock.sendPresenceUpdate("composing", senderJid);
+               
+                // Baca Tabel Pengguna untuk mendapatkan id_pemain
+                let no_hp = senderNumber;
+                if (senderJid.includes('120363177930974800@g.us') || senderJid.includes('120363401358668785@g.us')) no_hp = senderPart.split('@')[0];
+                        
+                console.log(no_hp);
+
+                const recPengguna = await getDataRowQuery({
+                        columns: ['pengguna.no_hp', 'pengguna.id_pemain', 'pemain.nama_pemain'],
+                        from: 'pengguna',
+                        joins: [{ table: 'pemain', on: 'pengguna.id_pemain = pemain.id_pemain'}],
+                        filters: {'pengguna.no_hp =': no_hp},
+                        orderBy: 'pemain.nama_pemain DESC'
+                  });
+
+                console.log('Posisi Ini:',senderNumber, no_hp, recPengguna.data);  
+
+                if (!recPengguna.success) return;
+                 
+                const id_pemain = recPengguna.data[0].id_pemain;
+                const nama_pemain = recPengguna.data[0].nama_pemain;
+
+                // Mengambil id_turnamen dengan status_presensi=1
+                const recTurnamen = await getDataRow('*', 'turnamen', {'jadwal_presensi':1});
+
+                if (!recTurnamen.success){
+                    await sock.sendMessage(senderJid, { text: `_Presensi tidak dapat dilakukan, karana *jadwal latihan tidak tersedia.*_` });
+                    return;
+                }
+
+                const id_turnamen = recTurnamen.data[0].id_turnamen;
+                const tgl_sekarang = new Date();
+                const hari = getDayNameFromDate(tgl_sekarang);
+                const jam = tgl_sekarang.getHours();
+                const menit = tgl_sekarang.getMinutes();
+                const detik = tgl_sekarang.getSeconds();
+
+                const loc = msg.message.locationMessage;
+                const userPoint = {longitude: loc.degreesLongitude, latitude: loc.degreesLatitude};
+                
+                console.log(`Lokasi diterima dari ${senderJid}:`, userPoint);
+
+                let matchedArea = null;
+                for (const area of locations) {
+                    if (isPointInPolygon(userPoint, area.polygon)) {
+                    matchedArea = area.name;
+                    break;
+                    }
+                }
+
+                let reply = '';
+                
+                if (matchedArea){
+                    // Baca Jadwal
+                    const recJadwal = await getDataRow('*', 'jadwal', {'hari':hari});
+                    if (!recJadwal.success){
+                       await sock.sendMessage(senderJid, { text: `_Presensi tidak dapat dilakukan, karena *bukan jadwal latihan*._` }); 
+                       return;
+                    }
+                    console.log(recJadwal.data);
+                    const waktu_sekarang = `${jam.toString().padStart(2, '0')}:${menit.toString().padStart(2, '0')}:${detik.toString().padStart(2, '0')}`;
+                    const waktuValid =  scheduleValid(recJadwal.data[0].mulai, recJadwal.data[0].selesai, waktu_sekarang);
+                    
+                    if (waktuValid) {
+
+                        // Proses Menyimpan Data
+                        reply = `_Lokasi valid di area: *${matchedArea}*._`;
+
+                        const dataPresensi = {
+                            'id_pemain': id_pemain,
+                            'id_turnamen': id_turnamen,
+                            'tgl_presensi': `${tgl_sekarang.getFullYear()}-${(tgl_sekarang.getMonth() + 1).toString().padStart(2, '0')}-${(tgl_sekarang.getDate()).toString().padStart(2, '0')}`,
+                            'waktu_presensi': tgl_sekarang,
+                            'longitude': loc.degreesLongitude,
+                            'latitude': loc.degreesLatitude,
+                            'area': matchedArea
+                        };
+                        const recPresensi = await insertData('presensi', dataPresensi);
+
+                        if (recPresensi.errnumber===1) {
+                            reply = `_*${nama_pemain}* melakukan presensi di area *${matchedArea}* pada ${DateTimeIndonesia(tgl_sekarang)}_`;
+                        } else {
+                            const wherePresensi = { 'id_pemain': id_pemain,
+                                                    'id_turnamen': id_turnamen,
+                                                    'tgl_presensi': `${tgl_sekarang.getFullYear()}-${(tgl_sekarang.getMonth() + 1).toString().padStart(2, '0')}-${(tgl_sekarang.getDate()).toString().padStart(2, '0')}`
+                                                };
+                            const recPresensi1 = await getDataRow('*', 'presensi', wherePresensi);
+
+                            reply = `_Presensi sudah dilakukan pada ${DateTimeIndonesia(recPresensi1.data[0].waktu_presensi)}._`;
+                        }
+                        //await sock.sendMessage(senderJid, { text: recPresensi.message });
+                    } 
+
+                } else {
+                    reply = `_Lokasi presensi tidak valid, Kirim lagi lokasinya._`;
+                }
+
+                console.log(matchedArea);
+
+                await sock.sendMessage(senderJid, { text: reply });
+                
+                return;
+            }
+
             //const [command] = parsePerintah(text);
             //console.log(command);
             //const para1 = command.parameter[0];
@@ -406,6 +535,7 @@ async function startBot() {
             //const para3 = command.parameter[2];
             //const menu = command.perintah;
             //console.log(para1, para2, para3);
+
             if (menu.toLowerCase()===GMP_RANGKING_PEMAIN){
                 if (command.parameter.length){
                     sock.sendPresenceUpdate("composing", senderJid);
@@ -457,6 +587,73 @@ async function startBot() {
                     await sock.sendMessage(senderJid, { text: `ID Turnamen belum dimasukkan.` }); 
                 }
                 delete userSessions[sender];
+            } else if (menu.toLowerCase()===GMP_REKAP_PRESENSI){
+                if (command.parameter){
+                    sock.sendPresenceUpdate("composing", senderJid);
+
+                    //console.log('Posisi ini')
+                    let id_turnamen = '';
+                    let nama_pemain = '';
+                    let id_pemain ='';
+                    let filter = {};
+                    if (command.parameter.length===2) {
+                        id_pemain = command.parameter[0];
+                        id_turnamen = command.parameter[1];
+                        
+                        const recPemain1 = await getIDPlayer(id_pemain);
+                        //console.log(recPemain1.success);
+                        if (recPemain1.success) { 
+                            id_pemain = recPemain1.data[0].id_pemain;
+                            nama_pemain = recPemain1.data[0].nama_pemain;
+                        } else {
+                            await sock.sendMessage(senderJid, { text: `Data ${command.parameter[0]} tidak ditemukan.` });
+                            delete userSessions[sender];
+                            return; 
+                        }
+                    } else id_turnamen = command.parameter[0];
+                    
+                    //console.log(id_turnamen);
+
+                    const recTur = await getDataRow('*', 'turnamen', {'alias': id_turnamen.toLowerCase()});
+                    if (recTur.success) {
+                        id_turnamen = recTur.data[0].id_turnamen;
+                    } else {
+                            await sock.sendMessage(senderJid, { text: `ID Turnamen tidak ditemukan.` });
+                            delete userSessions[sender];
+                            return; 
+                    }
+                    
+                    if (command.parameter.length===2) filter = {'presensi.id_pemain =': id_pemain, 'presensi.id_turnamen =': id_turnamen};
+                    
+                    const recPresensi = await getDataRowQuery({
+                    columns: [`presensi.id_pemain`, `presensi.id_turnamen`, `presensi.id_pemain`, `presensi.id_turnamen`,
+                                    `presensi.tgl_presensi`, `presensi.waktu_presensi`, `presensi.longitude`, `presensi.latitude`,
+                                    `presensi.area`, `pemain.nama_pemain`, `turnamen.nama_turnamen`, `turnamen.alias`, `turnamen.tgl_turnamen`,
+                                    `turnamen.tgl_realisasi`, `turnamen.tahun`, `count(1) AS jumlah_hadir`, `turnamen.priode_jadwal_mulai`,
+                                    `turnamen.priode_jadwal_selesai`, `turnamen.jadwal_presensi`],
+                            from: 'presensi',
+                            joins: [{ table: 'pemain', on: 'presensi.id_pemain = pemain.id_pemain'},
+                                    { table: 'turnamen', on: 'presensi.id_turnamen = turnamen.id_turnamen'}],
+                            filters: filter,
+                            groupBy: 'presensi.id_pemain, presensi.id_turnamen, turnamen.tahun',
+                            orderBy: 'presensi.id_pemain'
+                        });
+
+                    
+
+                  console.log(recPresensi.data);
+
+                  // Menampilkan Presensi
+                  let strPresensi = `*REKAPITULASI PRESENSI*\n${recPresensi.data[0].nama_turnamen}\nPeriode: ${DateToWIB(recPresensi.data[0].priode_jadwal_mulai)} s.d. ${DateToWIB(recPresensi.data[0].priode_jadwal_selesai)}\n\n NO. NAMA PEMAIN          HADIR\n`;
+                    recPresensi.data.forEach((item, index) => {
+                    strPresensi += `${(index+1).toString().padStart(3, ' ')} ${item.nama_pemain.padEnd(20, ' ')} ${item.jumlah_hadir}\n`;                
+                });
+                await sock.sendMessage(senderJid, { text: strPresensi });
+                //console.log(strPresensi);
+
+
+                delete userSessions[sender];
+                }
             } else if (menu.toLowerCase()===GMP_HEAD_TO_HEAD || menu.toLowerCase()===GMP_HEAD_TO_HEAD2){
 
                 sock.sendPresenceUpdate("composing", senderJid);
@@ -652,7 +849,7 @@ async function startBot() {
                       { table: 'pemain', on: 'daftar.id_pemain = pemain.id_pemain' },
                       { table: 'turnamen', on: 'daftar.id_turnamen = turnamen.id_turnamen' }
                     ],
-                    filters: {'turnamen.id_turnamen': id_turnamen},
+                    filters: {'turnamen.id_turnamen =': id_turnamen},
                     orderBy: 'daftar.ranking_sebelum'
                   });
                   
@@ -698,7 +895,7 @@ async function startBot() {
                     columns: ['pengguna.no_hp', 'pengguna.id_pemain', 'pemain.nama_pemain'],
                     from: 'pengguna',
                     joins: [{ table: 'pemain', on: 'pengguna.id_pemain = pemain.id_pemain'}],
-                    filters: {'pengguna.no_hp': no_hp},
+                    filters: {'pengguna.no_hp =': no_hp},
                     orderBy: 'pemain.nama_pemain DESC'
                   });
                 if (recPengguna.success) {
@@ -766,7 +963,7 @@ async function startBot() {
                       { table: 'pemain', on: 'daftar.id_pemain = pemain.id_pemain' },
                       { table: 'turnamen', on: 'daftar.id_turnamen = turnamen.id_turnamen' }
                     ],
-                    filters: {'turnamen.id_turnamen': id_turnamen},
+                    filters: {'turnamen.id_turnamen =': id_turnamen},
                     orderBy: 'daftar.ranking_sebelum'
                   });
                    
@@ -846,7 +1043,7 @@ async function startBot() {
                       { table: 'pemain', on: 'daftar.id_pemain = pemain.id_pemain' },
                       { table: 'turnamen', on: 'daftar.id_turnamen = turnamen.id_turnamen' }
                     ],
-                    filters: {'turnamen.id_turnamen': id_turnamen},
+                    filters: {'turnamen.id_turnamen =': id_turnamen},
                     orderBy: 'daftar.ranking_sebelum'
                   });
                   if (recDaftar1.success) {

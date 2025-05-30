@@ -36,6 +36,7 @@ async function insertData(table, data) {
       'module': modul,
       'success': true,
       'message': msg,
+      'errnumber': 1,
       'data': result.affectedRows,
     }
 
@@ -51,12 +52,13 @@ async function insertData(table, data) {
           msg="❌ Gagal menambah. Referensi tidak ditemukan";
           break;
         default:
-          msg="✅ Proses menambah data berhasil.";
+          msg=`✅ Proses menambah data berhasil. (${err.errno})`;
       }
     return {
       'module': modul,
       'success': false,
       'message': msg,
+      'errnumber': err.errno,
       'data': {},
     }  
   } finally {
@@ -241,10 +243,90 @@ async function getDataRow(select, table, where = null) {
         }
   }
 
-  async function getDataRowQuery({ columns = ['*'], from = '', joins = [], filters = {}, orderBy = '', limit = null } = {}) {
+async function getDataRowQuery({
+  columns = ['*'],
+  from = '',
+  joins = [],
+  filters = {},
+  groupBy = '',
+  orderBy = '',
+  limit = null
+} = {}) {
+  const modul = 'getDataRowQuery';
+  const connection = await getConnection();
+
+  try {
+    if (!from) throw new Error("Parameter 'from' (tabel utama) wajib diisi!");
+
+    // 1. Select Columns
+    const columnClause = columns.length ? columns.join(', ') : '*';
+
+    // 2. Join Clauses
+    const joinClause = joins.map(j => {
+      const type = j.type?.toUpperCase() || 'INNER';
+      return `${type} JOIN ${j.table} ON (${j.on})`;
+    }).join('\n');
+
+    //console.log(filters);
+
+    // 3. Where Filters
+    const whereClause = Object.entries(filters).map(([key, value]) => {
+      const match = key.match(/^(.+?)\s*(=|<>|!=|>|<|>=|<=|LIKE)$/i);
+      if (!match) throw new Error(`Format filter tidak dikenali: '${key}'`);
+      const [_, column, operator] = match;
+      const safeVal = typeof value === 'string' ? `'${value.replace(/'/g, "''")}'` : value;
+      return `${column} ${operator.toUpperCase()} ${safeVal}`;
+    }).join(' AND ');
+
+    console.log(whereClause);
+
+    // 4. Optional GROUP BY, ORDER BY, LIMIT
+    const groupClause = groupBy ? `GROUP BY ${groupBy}` : '';
+    const orderClause = orderBy ? `ORDER BY ${orderBy}` : '';
+    const limitClause = typeof limit === 'number' ? `LIMIT ${limit}` : '';
+
+    // 5. Final Query
+    const query = [
+      `SELECT ${columnClause}`,
+      `FROM ${from}`,
+      joinClause,
+      whereClause ? `WHERE ${whereClause}` : '',
+      groupClause,
+      orderClause,
+      limitClause
+    ].filter(Boolean).join(' ') + ';';
+
+    console.log(query);
+
+    const [rows] = await connection.execute(query);
+    const status = rows.length > 0;
+
+    return {
+      module: modul,
+      success: status,
+      message: status ? 'Data berhasil dibaca...' : 'Data tidak ada...',
+      data: rows,
+    };
+
+  } catch (error) {
+    return {
+      module: modul,
+      success: false,
+      message: error.message || error,
+      data: {},
+    };
+  } finally {
+    if (connection) await connection.end();
+  }
+}
+
+
+
+/*  async function getDataRowQuery({ columns = ['*'], from = '', joins = [], filters = {}, orderBy = '', limit = null } = {}) {
     const modul = 'getDataRowQuery';
     const connection = await getConnection();
   
+    
     try {
       if (!from) throw new Error("Parameter 'from' (tabel utama) wajib diisi!");
   
@@ -256,7 +338,9 @@ async function getDataRow(select, table, where = null) {
         const type = j.type?.toUpperCase() || 'INNER';
         return `${type} JOIN ${j.table} ON (${j.on})`;
       }).join('\n');
-  
+
+      //console.log(columnClause, joinClause);
+
       // 3. Where Filters (dukungan untuk kondisi seperti '=', '<>', 'LIKE', dll)
       const whereClause = Object.entries(filters).map(([key, value]) => {
         const match = key.match(/^(.+?)\s*(=|<>|!=|>|<|>=|<=|LIKE)$/i);
@@ -266,10 +350,13 @@ async function getDataRow(select, table, where = null) {
         return `${column} ${operator.toUpperCase()} ${safeVal}`;
       }).join(' AND ');
   
+      //console.log('WHERE: ',whereClause);
+
       // 4. Order dan Limit
       const orderClause = orderBy ? `ORDER BY ${orderBy}` : '';
       const limitClause = typeof limit === 'number' ? `LIMIT ${limit}` : '';
   
+
       // 5. Final SQL
       const query = `SELECT ${columnClause} FROM ${from} ${joinClause} ${whereClause ? 'WHERE ' + whereClause : ''} ${orderClause} ${limitClause};`.trim();
   
@@ -296,7 +383,9 @@ async function getDataRow(select, table, where = null) {
       if (connection) await connection.end();
     }
   }
-  
+*/  
+
+
 
   async function getDataRowQuery2({ columns = ['*'], from = '', joins = [], filters = {}, orderBy = '', limit = null} = {}) {
     const modul = 'getDataRowQuery';
