@@ -215,6 +215,14 @@ function scheduleValid(mulai, selesai, sekarang) {
   return sekarang >= mulai && sekarang <= selesai;
 }
 
+function Syarat(jumlah){
+    if (jumlah===3) {
+        return "MS";
+     } else 
+     {
+        return "TMS";
+     }
+}
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState("./auth_multi_device"); 
@@ -472,9 +480,10 @@ async function startBot() {
              * Kirim Data Presensi
              *************************/
 
-            if (msg.message.locationMessage){
+            if (msg.message.locationMessage||msg.message.liveLocationMessage){
                 //sock.sendPresenceUpdate("composing", senderJid);
-                const isForwarded = msg.message.locationMessage.contextInfo?.isForwarded || false;
+                let isForwarded = false;
+                if (msg.message.locationMessage) isForwarded = msg.message.locationMessage.contextInfo?.isForwarded || false;
 
                 // Baca Tabel Pengguna untuk mendapatkan id_pemain
                 let no_hp = senderNumber;
@@ -518,7 +527,7 @@ async function startBot() {
                 const menit = tgl_sekarang.getMinutes();
                 const detik = tgl_sekarang.getSeconds();
 
-                const loc = msg.message.locationMessage;
+                const loc = msg.message.locationMessage||msg.message.liveLocationMessage;
                 const userPoint = {longitude: loc.degreesLongitude, latitude: loc.degreesLatitude};
                 
                 console.log(`Lokasi diterima dari ${senderJid}:`, userPoint);
@@ -573,6 +582,8 @@ async function startBot() {
                             reply = `_Presensi sudah dilakukan pada ${DateTimeIndonesia(recPresensi1.data[0].waktu_presensi)}._`;
                         }
                         //await sock.sendMessage(senderJid, { text: recPresensi.message });
+                    } else {
+                       await sock.sendMessage(senderJid, { text: 'Anda melakukan presensi diluar dari waktu yang telah ditetapkan.' }); 
                     } 
 
                 } else {
@@ -681,7 +692,11 @@ async function startBot() {
                             return; 
                     }
                     
-                    if (command.parameter.length===2) filter = {'presensi.id_pemain =': id_pemain, 'presensi.id_turnamen =': id_turnamen};
+                    if (command.parameter.length===2) {
+                        filter = {'presensi.id_pemain =': id_pemain, 'presensi.id_turnamen =': id_turnamen}; 
+                    } else {
+                        if (command.parameter.length===1) filter = {'presensi.id_turnamen =': id_turnamen};
+                    }
                     
                     const recPresensi = await getDataRowQuery({
                     columns: [`presensi.id_pemain`, `presensi.id_turnamen`, `presensi.id_pemain`, `presensi.id_turnamen`,
@@ -694,7 +709,7 @@ async function startBot() {
                                     { table: 'turnamen', on: 'presensi.id_turnamen = turnamen.id_turnamen'}],
                             filters: filter,
                             groupBy: 'presensi.id_pemain, presensi.id_turnamen, turnamen.tahun',
-                            orderBy: 'presensi.id_pemain'
+                            orderBy: 'jumlah_hadir DESC'
                         });
 
                     
@@ -702,10 +717,11 @@ async function startBot() {
                   console.log(recPresensi.data);
 
                   // Menampilkan Presensi
-                  let strPresensi = `*REKAPITULASI PRESENSI*\n${recPresensi.data[0].nama_turnamen}\nPeriode: ${DateToWIB(recPresensi.data[0].priode_jadwal_mulai)} s.d. ${DateToWIB(recPresensi.data[0].priode_jadwal_selesai)}\n\n NO. NAMA PEMAIN          HADIR\n`;
+                  let strPresensi = `*REKAPITULASI PRESENSI*\n${recPresensi.data[0].nama_turnamen}\nPeriode: ${DateToWIB(recPresensi.data[0].priode_jadwal_mulai)} s.d. ${DateToWIB(recPresensi.data[0].priode_jadwal_selesai)}\n\n NO. NAMA PEMAIN          HADIR PERSYARATAN\n`;
                     recPresensi.data.forEach((item, index) => {
-                    strPresensi += `${(index+1).toString().padStart(3, ' ')} ${item.nama_pemain.padEnd(20, ' ')} ${item.jumlah_hadir}\n`;                
+                    strPresensi += `${(index+1).toString().padStart(3, ' ')} ${item.nama_pemain.padEnd(20, ' ')} ${item.jumlah_hadir} ${Syarat(item.jumlah_hadir)}\n`;
                 });
+                strPresensi += `\nCatatan:\n_MS  = Memenuhi Syarat_\n_TMS =Tidak Memenuhi Syarat_`;
                 await sock.sendMessage(senderJid, { text: strPresensi });
                 //console.log(strPresensi);
 
@@ -972,7 +988,7 @@ async function startBot() {
                           
                         //console.log(strDaftar);
                         await sock.sendMessage(senderJid, { text: strDaftar });
-                        await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
+                        if (grup!==2) await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
                     }
                 } else {
                     await sock.sendMessage(senderJid, { text: `_Presensi *${recPresensi.data[0].nama_pemain}* berjumlah ${recPresensi.data[0].jumlah_hadir}, jadi *belum memenuhi syarat*._`});
@@ -1132,7 +1148,7 @@ async function startBot() {
                                 });
                                 
                                 await sock.sendMessage(senderJid, { text: strDaftar });
-                                await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
+                                if (grup!==2) await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
                         }
                     } else {
                         await sock.sendMessage(senderJid, { text: `_Presensi *${recPresensi.data[0].nama_pemain}* berjumlah ${recPresensi.data[0].jumlah_hadir}, jadi *belum memenuhi syarat*._`});
@@ -1218,7 +1234,7 @@ async function startBot() {
                           
                     //console.log(strDaftar);
                     await sock.sendMessage(senderJid, { text: strDaftar });
-                    await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
+                    if (grup!==2) await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
                 } else {
                     await sock.sendMessage(senderJid, { text: `_Data tidak tersedia._` });
                 }
